@@ -6,6 +6,7 @@ class Memory
 {
 	/*
 	--Author: 0xPrince
+	 --UPDATE- 1.1
 	*/
 public:
 	DWORD ProcessId = 0;
@@ -22,32 +23,75 @@ public:
 			return false;
 		ProcessId = ProcId;
 		ProcessHandle = OpenProcess(PROCESS_ALL_ACCESS, 0, ProcessId);
-		
 		return ProcessHandle != nullptr;
 	}
-	bool ReplacePattern(DWORD_PTR dwStartRange, DWORD_PTR dwEndRange, BYTE* SearchAob, size_t SearchBytesSize, BYTE ReplaceAob[], size_t RepBytesSize)
+
+	bool ChangeProtection(ULONG Address,size_t size,DWORD NewProtect, DWORD& OldProtect)
+	{
+	return VirtualProtectEx(ProcessHandle, (LPVOID)Address, size, NewProtect, &OldProtect);;
+	}
+
+	bool ReplacePattern(DWORD_PTR dwStartRange, DWORD_PTR dwEndRange, BYTE* SearchAob, BYTE* ReplaceAob, bool ForceWrite = false)
 	{
 		//Author: 0xPrince
+		int RepByteSize = _msize(ReplaceAob);
+		if (RepByteSize <= 0) return false;
 		std::vector<DWORD_PTR> foundedAddress;
-		FindPattern(dwStartRange, dwEndRange, SearchAob, SearchBytesSize, foundedAddress);
+		FindPattern(dwStartRange, dwEndRange, SearchAob, foundedAddress);
 		if (foundedAddress.empty())
 			return false;
-		DWORD OldProtect;
 		for (int i = 0; i < foundedAddress.size(); i++)
 		{
-			VirtualProtectEx(ProcessHandle, (LPVOID)foundedAddress[i], RepBytesSize, 0x40, &OldProtect);
-			BOOL WriteStat = WriteProcessMemory(ProcessHandle, (LPVOID)foundedAddress[i], ReplaceAob, RepBytesSize, 0);
-			if (OldProtect != 0)
-			{
-				VirtualProtectEx(ProcessHandle, (LPVOID)foundedAddress[i], RepBytesSize, OldProtect, &OldProtect);
-			}
+			BOOL WriteStat = WriteBytes(foundedAddress[i], ReplaceAob,ForceWrite);
 			if (!WriteStat)
 				return false;
 		}
 		return true;
 	}
+	
+	template <typename T>
+	T ReadMemory(ULONG WriteAddress)
+	{
+		T pBuffer;
+		ReadProcessMemory(ProcessHandle, (LPCVOID)WriteAddress, &pBuffer, sizeof(pBuffer), nullptr);
+		return pBuffer;
+	}
+	template <typename T>
+	bool WriteMemory(ULONG WriteAddress, T WriteValue,bool ForceWrite =false)
+	{
+		DWORD OldProtect;
+		bool PStatus = false;
+		if (ForceWrite)
+		{
+			 PStatus = ChangeProtection(WriteAddress, sizeof(WriteValue), PAGE_EXECUTE_READWRITE, OldProtect);
+		}
+		bool status = WriteProcessMemory(ProcessHandle, (LPVOID)WriteAddress, &WriteValue, sizeof(WriteValue), nullptr);
+		if (OldProtect !=0 && ForceWrite)
+		{
+			 PStatus = ChangeProtection(WriteAddress, sizeof(WriteValue), PAGE_EXECUTE_READWRITE, OldProtect);
+		}
+		return PStatus && status;
+	}
 
-	bool FindPattern(DWORD_PTR StartRange, DWORD_PTR EndRange, BYTE* bSearchData, DWORD nSearchSize, std::vector<DWORD_PTR>& AddressRet)
+	bool WriteBytes(ULONG WriteAddress, BYTE* RepByte,bool ForceWrite = false) {
+
+		DWORD OldProtect;
+		int RepByteSize = _msize(RepByte);
+		if (RepByteSize <= 0) return false;
+		if(ForceWrite)
+		{
+			ChangeProtection(WriteAddress, RepByteSize, PAGE_EXECUTE_READWRITE, OldProtect);
+		}
+		bool status = WriteProcessMemory(ProcessHandle, (LPVOID)WriteAddress, RepByte, RepByteSize, 0);
+		if (ForceWrite&& OldProtect != 0)
+		{
+			ChangeProtection(WriteAddress, RepByteSize, PAGE_EXECUTE_READ, OldProtect);
+		}
+		delete[] RepByte;
+		return status;
+	}
+
+	bool FindPattern(DWORD_PTR StartRange, DWORD_PTR EndRange, BYTE* SearchBytes, std::vector<DWORD_PTR>& AddressRet)
 	{
 
 		BYTE* pCurrMemoryData = NULL;
@@ -55,7 +99,7 @@ public:
 		std::vector<MEMORY_REGION> m_vMemoryRegion;
 		mbi.RegionSize = 0x1000;
 		DWORD dwAddress = StartRange;
-
+		DWORD nSearchSize = _msize(SearchBytes);
 
 
 		while (VirtualQueryEx(ProcessHandle, (LPCVOID)dwAddress, &mbi, sizeof(mbi)) && (dwAddress < EndRange) && ((dwAddress + mbi.RegionSize) > dwAddress))
@@ -91,13 +135,13 @@ public:
 					continue;
 				}
 				DWORD_PTR dwOffset = 0;
-				int iOffset = Memfind(pCurrMemoryData, dwNumberOfBytesRead, bSearchData, nSearchSize);
+				int iOffset = Memfind(pCurrMemoryData, dwNumberOfBytesRead, SearchBytes, nSearchSize);
 				while (iOffset != -1)
 				{
 					dwOffset += iOffset;
 					AddressRet.push_back(dwOffset + mData.dwBaseAddr);
 					dwOffset += nSearchSize;
-					iOffset = Memfind(pCurrMemoryData + dwOffset, dwNumberOfBytesRead - dwOffset - nSearchSize, bSearchData, nSearchSize);
+					iOffset = Memfind(pCurrMemoryData + dwOffset, dwNumberOfBytesRead - dwOffset - nSearchSize, SearchBytes, nSearchSize);
 				}
 		
 			if (pCurrMemoryData != NULL)
@@ -110,7 +154,6 @@ public:
 		return TRUE;
 	}
 
-	
 	int Memfind(BYTE* buffer, DWORD dwBufferSize, BYTE* bstr, DWORD dwStrLen) {
 		if (dwBufferSize < 0) {
 			return -1;
