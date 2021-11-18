@@ -11,6 +11,3 @@ https://www.unknowncheats.me/forum/members/3815611.html
 * ChangeMemoryProtection
 * FindPattern
 * ReplacePattern
-
-
-
