@@ -68,7 +68,7 @@ public:
 		bool status = WriteProcessMemory(ProcessHandle, (LPVOID)WriteAddress, &WriteValue, sizeof(WriteValue), nullptr);
 		if (OldProtect !=0 && ForceWrite)
 		{
-			 PStatus = ChangeProtection(WriteAddress, sizeof(WriteValue), PAGE_EXECUTE_READWRITE, OldProtect);
+			 PStatus = ChangeProtection(WriteAddress, sizeof(WriteValue), OldProtect, OldProtect);
 		}
 		return PStatus && status;
 	}
@@ -85,7 +85,7 @@ public:
 		bool status = WriteProcessMemory(ProcessHandle, (LPVOID)WriteAddress, RepByte, RepByteSize, 0);
 		if (ForceWrite&& OldProtect != 0)
 		{
-			ChangeProtection(WriteAddress, RepByteSize, PAGE_EXECUTE_READ, OldProtect);
+			ChangeProtection(WriteAddress, RepByteSize, OldProtect, OldProtect);
 		}
 		delete[] RepByte;
 		return status;
